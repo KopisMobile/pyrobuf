@@ -9,7 +9,7 @@ import json
 import warnings
 
 {%- for import in imports %}
-from {{ import }}_proto cimport *
+from {{ import | replace("/", ".") }}_proto cimport *
 {%- endfor %}
 
 {%- macro message_enum_fields_def(enum) %}

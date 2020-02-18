@@ -23,10 +23,11 @@ class Compiler(object):
     t_pxd = _env.get_template('proto_pxd.tmpl')
     t_pyx = _env.get_template('proto_pyx.tmpl')
 
-    def __init__(self, sources, out="out", build="build", install=False,
-                 proto3=False, force=False, package=None, includes=None,
-                 clean=False):
+    def __init__(self, sources, recursive=False, out="out", build="build",
+                 install=False, proto3=False, force=False, package=None,
+                 includes=None, clean=False):
         self.sources = sources
+        self.recursive = recursive
         self.out = out
         self.build = build
         self.install = install
@@ -53,6 +54,9 @@ class Compiler(object):
                             help="<filename>.proto or directory containing "
                                  "proto files",
                             nargs='+')
+        parser.add_argument('--recursive', action='store_true',
+                            help="search source directories recursively for"
+                                 "proto files")
         parser.add_argument('--out-dir', default='out',
                             help="cythonize output directory [default: out]")
         parser.add_argument('--build-dir', default='build',
@@ -71,7 +75,8 @@ class Compiler(object):
                             help="force recompilation of messages")
         args = parser.parse_args()
 
-        return cls(args.sources, out=args.out_dir, build=args.build_dir,
+        return cls(args.sources, recursive=args.recursive,
+                   out=args.out_dir, build=args.build_dir,
                    install=args.install, proto3=args.proto3, force=args.force,
                    package=args.package, includes=args.include,
                    clean=args.clean)
@@ -110,17 +115,23 @@ class Compiler(object):
     def _compile_spec(self):
         try:
             os.makedirs(self.out)
+            with open(os.path.join(self.out, '__init__.py'), 'w'):
+                pass
         except _FileExistsError:
             pass
 
         for source in self.sources:
             if os.path.isdir(source):
-                for spec in glob.glob(os.path.join(source, '*.proto')):
-                    self._generate(spec)
+                if self.recursive:
+                    globs = glob.iglob(os.path.join(source, '**/*.proto'), recursive=True)
+                else:
+                    globs = glob.iglob(os.path.join(source, '*.proto'))
+                for spec in globs:
+                    self._generate(spec, top_dir=source)
             else:
                 self._generate(source)
 
-    def _generate(self, filename):
+    def _generate(self, filename, top_dir=None):
         name, _ = os.path.splitext(os.path.basename(filename))
         directory = os.path.dirname(filename)
 
@@ -143,42 +154,47 @@ class Compiler(object):
                     break
 
             try:
-                self._generate(depends)
+                self._generate(depends, top_dir=top_dir)
             except FileNotFoundError:
                 raise FileNotFoundError("can't find message spec for '{}'"
                                         .format(f))
 
         if self.package is None:
-            self._write(name, msg_def)
+            rel_dir = os.path.relpath(directory, start=top_dir) if top_dir else ''
+            self._write(rel_dir, name, msg_def)
 
-    def _write(self, name, msg_def):
+    def _write(self, directory, name, msg_def):
         name_pxd = "{}_proto.pxd".format(name)
         name_pyx = "{}_proto.pyx".format(name)
-        self._pyx_files.append(os.path.join(self.out, name_pyx))
+        self._pyx_files.append(os.path.join(self.out, directory, name_pyx))
 
         generated_pxd = self.t_pxd.render(msg_def, version_major=_VM)
         generated_pyx = self.t_pyx.render(msg_def, version_major=_VM)
         write_pxd = True
         write_pyx = True
 
-        if not self.clean and os.path.exists(os.path.join(self.out, name_pxd)):
-            with open(os.path.join(self.out, name_pxd), 'r') as fp:
+        os.makedirs(os.path.join(self.out, directory), exist_ok=True)
+        with open(os.path.join(self.out, directory, '__init__.py'), 'w'):
+            pass
+
+        if not self.clean and os.path.exists(os.path.join(self.out, directory, name_pxd)):
+            with open(os.path.join(self.out, directory, name_pxd), 'r') as fp:
                 if fp.read().strip() == generated_pxd.strip():
                     write_pxd = False
                     print('{} has not changed'.format(name_pxd))
 
-        if not self.clean and os.path.exists(os.path.join(self.out, name_pyx)):
-            with open(os.path.join(self.out, name_pyx), 'r') as fp:
+        if not self.clean and os.path.exists(os.path.join(self.out, directory, name_pyx)):
+            with open(os.path.join(self.out, directory, name_pyx), 'r') as fp:
                 if fp.read().strip() == generated_pyx.strip():
                     write_pyx = False
                     print('{} has not changed'.format(name_pyx))
 
         if write_pxd:
-            with open(os.path.join(self.out, name_pxd), 'w') as fp:
+            with open(os.path.join(self.out, directory, name_pxd), 'w') as fp:
                 fp.write(generated_pxd)
 
         if write_pyx:
-            with open(os.path.join(self.out, name_pyx), 'w') as fp:
+            with open(os.path.join(self.out, directory, name_pyx), 'w') as fp:
                 fp.write(generated_pyx)
 
     def _package(self):
