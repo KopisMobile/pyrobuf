@@ -25,7 +25,7 @@ class Compiler(object):
 
     def __init__(self, sources, recursive=False, out="out", build="build",
                  install=False, proto3=False, force=False, package=None,
-                 includes=None, clean=False):
+                 includes=None, clean=False, lang_level=None):
         self.sources = sources
         self.recursive = recursive
         self.out = out
@@ -35,6 +35,7 @@ class Compiler(object):
         self.package = package
         self.includes = includes or []
         self.clean = clean
+        self.lang_level = lang_level
         here = os.path.dirname(os.path.abspath(__file__))
         self.include_path = [os.path.join(here, 'src'), self.out]
         self._generated = set()
@@ -73,13 +74,15 @@ class Compiler(object):
                             help="add directory to includes path")
         parser.add_argument('--clean', action='store_true',
                             help="force recompilation of messages")
+        parser.add_argument('--lang-level', type=int, default=3,
+                            help="major Python version to target")
         args = parser.parse_args()
 
         return cls(args.sources, recursive=args.recursive,
                    out=args.out_dir, build=args.build_dir,
                    install=args.install, proto3=args.proto3, force=args.force,
                    package=args.package, includes=args.include,
-                   clean=args.clean)
+                   clean=args.clean, lang_level=args.lang_level)
 
     def compile(self):
         script_args = ['build', '--build-base={0}'.format(self.build)]
@@ -97,6 +100,7 @@ class Compiler(object):
 
         setup(name='pyrobuf-generated',
               ext_modules=cythonize(self._pyx_files,
+                                    language_level=self.lang_level,
                                     include_path=self.include_path),
               script_args=script_args)
 
@@ -110,6 +114,7 @@ class Compiler(object):
             dist.ext_modules = []
 
         dist.ext_modules.extend(cythonize(self._pyx_files,
+                                          language_level=self.lang_level,
                                           include_path=self.include_path))
 
     def _compile_spec(self):
