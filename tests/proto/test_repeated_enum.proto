@@ -5,4 +5,5 @@ message TestRepeatedEnum {
         TEST_ENUM_FIELD_2 = 2;
     }
     repeated EnumField list_enum = 1;
+    optional EnumField single_enum = 2;
 }
